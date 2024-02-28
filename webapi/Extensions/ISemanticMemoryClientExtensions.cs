@@ -21,7 +21,7 @@ namespace CopilotChat.WebApi.Extensions;
 /// </summary>
 internal static class ISemanticMemoryClientExtensions
 {
-    private static readonly List<string> pipelineSteps = new() { "extract", "partition", "gen_embeddings", "save_embeddings" };
+    private static readonly List<string> pipelineSteps = new() { "extract", "partition", "gen_embeddings", "save_records" };
 
     /// <summary>
     /// Inject <see cref="IKernelMemory"/>.
@@ -32,7 +32,7 @@ internal static class ISemanticMemoryClientExtensions
 
         var memoryConfig = serviceProvider.GetRequiredService<IOptions<KernelMemoryConfig>>().Value;
 
-        var ocrType = memoryConfig.ImageOcrType;
+        var ocrType = memoryConfig.DataIngestion.ImageOcrType;
         var hasOcr = !string.IsNullOrWhiteSpace(ocrType) && !ocrType.Equals(MemoryConfiguration.NoneType, StringComparison.OrdinalIgnoreCase);
 
         var pipelineType = memoryConfig.DataIngestion.OrchestrationType;
@@ -54,7 +54,10 @@ internal static class ISemanticMemoryClientExtensions
             }
         }
 
-        IKernelMemory memory = memoryBuilder.FromAppSettings().Build();
+        IKernelMemory memory = memoryBuilder.FromMemoryConfiguration(
+            memoryConfig,
+            appBuilder.Configuration
+        ).Build();
 
         appBuilder.Services.AddSingleton(memory);
     }
@@ -117,7 +120,7 @@ internal static class ISemanticMemoryClientExtensions
             new DocumentUploadRequest
             {
                 DocumentId = documentId,
-                Files = new List<DocumentUploadRequest.UploadedFile> { new DocumentUploadRequest.UploadedFile(fileName, fileContent) },
+                Files = new List<DocumentUploadRequest.UploadedFile> { new(fileName, fileContent) },
                 Index = indexName,
                 Steps = pipelineSteps,
             };

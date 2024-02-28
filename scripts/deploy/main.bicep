@@ -37,24 +37,21 @@ param completionModel string = 'gpt-35-turbo'
 @description('Model to use for text embeddings')
 param embeddingModel string = 'text-embedding-ada-002'
 
-@description('Completion model the task planner should use')
-param plannerModel string = 'gpt-35-turbo'
-
 @description('Azure OpenAI endpoint to use (Azure OpenAI only)')
 param aiEndpoint string = ''
 
 @secure()
 @description('Azure OpenAI or OpenAI API key')
-param aiApiKey string = ''
+param aiApiKey string
 
 @description('Azure AD client ID for the backend web API')
-param webApiClientId string = ''
+param webApiClientId string
 
 @description('Azure AD client ID for the frontend')
-param frontendClientId string = ''
+param frontendClientId string
 
 @description('Azure AD tenant ID for authenticating users')
-param azureAdTenantId string = ''
+param azureAdTenantId string
 
 @description('Azure AD cloud instance for authenticating users')
 param azureAdInstance string = environment().authentication.loginEndpoint
@@ -67,10 +64,10 @@ param deployCosmosDB bool = true
 
 @description('What method to use to persist embeddings')
 @allowed([
-  'AzureCognitiveSearch'
+  'AzureAISearch'
   'Qdrant'
 ])
-param memoryStore string = 'AzureCognitiveSearch'
+param memoryStore string = 'AzureAISearch'
 
 @description('Whether to deploy Azure Speech Services to enable input by voice')
 param deploySpeechServices bool = true
@@ -157,7 +154,7 @@ resource appServiceWeb 'Microsoft.Web/sites@2022-09-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
-    virtualNetworkSubnetId: virtualNetwork.properties.subnets[0].id
+    virtualNetworkSubnetId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[0].id : null
     siteConfig: {
       healthCheckPath: '/healthz'
     }
@@ -167,6 +164,9 @@ resource appServiceWeb 'Microsoft.Web/sites@2022-09-01' = {
 resource appServiceWebConfig 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: appServiceWeb
   name: 'web'
+  dependsOn: [
+    webSubnetConnection
+  ]
   properties: {
     alwaysOn: false
     cors: {
@@ -202,10 +202,6 @@ resource appServiceWebConfig 'Microsoft.Web/sites/config@2022-09-01' = {
         {
           name: 'Authentication:AzureAd:Scopes'
           value: 'access_as_user'
-        }
-        {
-          name: 'Planner:Model'
-          value: plannerModel
         }
         {
           name: 'ChatStore:Type'
@@ -308,11 +304,11 @@ resource appServiceWebConfig 'Microsoft.Web/sites/config@2022-09-01' = {
           value: aiService
         }
         {
-          name: 'KernelMemory:DataIngestion:VectorDbTypes:0'
+          name: 'KernelMemory:DataIngestion:MemoryDbTypes:0'
           value: memoryStore
         }
         {
-          name: 'KernelMemory:Retrieval:VectorDbType'
+          name: 'KernelMemory:Retrieval:MemoryDbType'
           value: memoryStore
         }
         {
@@ -340,16 +336,16 @@ resource appServiceWebConfig 'Microsoft.Web/sites/config@2022-09-01' = {
           value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[1].value}'
         }
         {
-          name: 'KernelMemory:Services:AzureCognitiveSearch:Auth'
+          name: 'KernelMemory:Services:AzureAISearch:Auth'
           value: 'ApiKey'
         }
         {
-          name: 'KernelMemory:Services:AzureCognitiveSearch:Endpoint'
-          value: memoryStore == 'AzureCognitiveSearch' ? 'https://${azureCognitiveSearch.name}.search.windows.net' : ''
+          name: 'KernelMemory:Services:AzureAISearch:Endpoint'
+          value: memoryStore == 'AzureAISearch' ? 'https://${azureAISearch.name}.search.windows.net' : ''
         }
         {
-          name: 'KernelMemory:Services:AzureCognitiveSearch:APIKey'
-          value: memoryStore == 'AzureCognitiveSearch' ? azureCognitiveSearch.listAdminKeys().primaryKey : ''
+          name: 'KernelMemory:Services:AzureAISearch:APIKey'
+          value: memoryStore == 'AzureAISearch' ? azureAISearch.listAdminKeys().primaryKey : ''
         }
         {
           name: 'KernelMemory:Services:Qdrant:Endpoint'
@@ -435,7 +431,6 @@ resource appServiceWebDeploy 'Microsoft.Web/sites/extensions@2022-09-01' = if (d
   }
   dependsOn: [
     appServiceWebConfig
-    webSubnetConnection
   ]
 }
 
@@ -448,7 +443,7 @@ resource appServiceMemoryPipeline 'Microsoft.Web/sites@2022-09-01' = {
   }
   properties: {
     serverFarmId: appServicePlan.id
-    virtualNetworkSubnetId: virtualNetwork.properties.subnets[0].id
+    virtualNetworkSubnetId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[0].id : null
     siteConfig: {
       alwaysOn: true
     }
@@ -458,6 +453,9 @@ resource appServiceMemoryPipeline 'Microsoft.Web/sites@2022-09-01' = {
 resource appServiceMemoryPipelineConfig 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: appServiceMemoryPipeline
   name: 'web'
+  dependsOn: [
+    memSubnetConnection
+  ]
   properties: {
     alwaysOn: true
     detailedErrorLoggingEnabled: true
@@ -475,7 +473,7 @@ resource appServiceMemoryPipelineConfig 'Microsoft.Web/sites/config@2022-09-01' 
         value: aiService
       }
       {
-        name: 'KernelMemory:ImageOcrType'
+        name: 'KernelMemory:DataIngestion:ImageOcrType'
         value: 'AzureFormRecognizer'
       }
       {
@@ -491,11 +489,11 @@ resource appServiceMemoryPipelineConfig 'Microsoft.Web/sites/config@2022-09-01' 
         value: aiService
       }
       {
-        name: 'KernelMemory:DataIngestion:VectorDbTypes:0'
+        name: 'KernelMemory:DataIngestion:MemoryDbTypes:0'
         value: memoryStore
       }
       {
-        name: 'KernelMemory:Retrieval:VectorDbType'
+        name: 'KernelMemory:Retrieval:MemoryDbType'
         value: memoryStore
       }
       {
@@ -523,16 +521,16 @@ resource appServiceMemoryPipelineConfig 'Microsoft.Web/sites/config@2022-09-01' 
         value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[1].value}'
       }
       {
-        name: 'KernelMemory:Services:AzureCognitiveSearch:Auth'
+        name: 'KernelMemory:Services:AzureAISearch:Auth'
         value: 'ApiKey'
       }
       {
-        name: 'KernelMemory:Services:AzureCognitiveSearch:Endpoint'
-        value: memoryStore == 'AzureCognitiveSearch' ? 'https://${azureCognitiveSearch.name}.search.windows.net' : ''
+        name: 'KernelMemory:Services:AzureAISearch:Endpoint'
+        value: memoryStore == 'AzureAISearch' ? 'https://${azureAISearch.name}.search.windows.net' : ''
       }
       {
-        name: 'KernelMemory:Services:AzureCognitiveSearch:APIKey'
-        value: memoryStore == 'AzureCognitiveSearch' ? azureCognitiveSearch.listAdminKeys().primaryKey : ''
+        name: 'KernelMemory:Services:AzureAISearch:APIKey'
+        value: memoryStore == 'AzureAISearch' ? azureAISearch.listAdminKeys().primaryKey : ''
       }
       {
         name: 'KernelMemory:Services:Qdrant:Endpoint'
@@ -623,7 +621,6 @@ resource appServiceMemoryPipelineDeploy 'Microsoft.Web/sites/extensions@2022-09-
   }
   dependsOn: [
     appServiceMemoryPipelineConfig
-    memSubnetConnection
   ]
 }
 
@@ -775,7 +772,7 @@ resource appServiceQdrant 'Microsoft.Web/sites@2022-09-01' = if (memoryStore == 
     httpsOnly: true
     reserved: true
     clientCertMode: 'Required'
-    virtualNetworkSubnetId: virtualNetwork.properties.subnets[1].id
+    virtualNetworkSubnetId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[1].id : null
     siteConfig: {
       numberOfWorkers: 1
       linuxFxVersion: 'DOCKER|qdrant/qdrant:latest'
@@ -783,7 +780,7 @@ resource appServiceQdrant 'Microsoft.Web/sites@2022-09-01' = if (memoryStore == 
       vnetRouteAllEnabled: true
       ipSecurityRestrictions: [
         {
-          vnetSubnetResourceId: virtualNetwork.properties.subnets[0].id
+          vnetSubnetResourceId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[0].id : null
           action: 'Allow'
           priority: 300
           name: 'Allow front vnet'
@@ -808,7 +805,7 @@ resource appServiceQdrant 'Microsoft.Web/sites@2022-09-01' = if (memoryStore == 
   }
 }
 
-resource azureCognitiveSearch 'Microsoft.Search/searchServices@2022-09-01' = if (memoryStore == 'AzureCognitiveSearch') {
+resource azureAISearch 'Microsoft.Search/searchServices@2022-09-01' = if (memoryStore == 'AzureAISearch') {
   name: 'acs-${uniqueName}'
   location: location
   sku: {
@@ -820,7 +817,7 @@ resource azureCognitiveSearch 'Microsoft.Search/searchServices@2022-09-01' = if 
   }
 }
 
-resource virtualNetwork 'Microsoft.Network/virtualNetworks@2021-05-01' = {
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2021-05-01' = if (memoryStore == 'Qdrant') {
   name: 'vnet-${uniqueName}'
   location: location
   properties: {
@@ -888,7 +885,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2021-05-01' = {
   }
 }
 
-resource webNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = {
+resource webNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = if (memoryStore == 'Qdrant') {
   name: 'nsg-${uniqueName}-webapi'
   location: location
   properties: {
@@ -910,7 +907,7 @@ resource webNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = {
   }
 }
 
-resource qdrantNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = {
+resource qdrantNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = if (memoryStore == 'Qdrant') {
   name: 'nsg-${uniqueName}-qdrant'
   location: location
   properties: {
@@ -918,20 +915,20 @@ resource qdrantNsg 'Microsoft.Network/networkSecurityGroups@2022-11-01' = {
   }
 }
 
-resource webSubnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2022-09-01' = {
+resource webSubnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2022-09-01' = if (memoryStore == 'Qdrant') {
   parent: appServiceWeb
   name: 'webSubnetConnection'
   properties: {
-    vnetResourceId: virtualNetwork.properties.subnets[0].id
+    vnetResourceId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[0].id : null
     isSwift: true
   }
 }
 
-resource memSubnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2022-09-01' = {
+resource memSubnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2022-09-01' = if (memoryStore == 'Qdrant') {
   parent: appServiceMemoryPipeline
   name: 'memSubnetConnection'
   properties: {
-    vnetResourceId: virtualNetwork.properties.subnets[0].id
+    vnetResourceId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[0].id : null
     isSwift: true
   }
 }
@@ -940,7 +937,7 @@ resource qdrantSubnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2
   parent: appServiceQdrant
   name: 'qdrantSubnetConnection'
   properties: {
-    vnetResourceId: virtualNetwork.properties.subnets[1].id
+    vnetResourceId: memoryStore == 'Qdrant' ? virtualNetwork.properties.subnets[1].id : null
     isSwift: true
   }
 }

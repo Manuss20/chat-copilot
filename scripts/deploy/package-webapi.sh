@@ -13,7 +13,7 @@ usage() {
     echo "Arguments:"
     echo "  -c, --configuration CONFIGURATION      Build configuration (default: Release)"
     echo "  -d, --dotnet DOTNET_FRAMEWORK_VERSION  Target dotnet framework (default: net6.0)"
-    echo "  -r, --runtime TARGET_RUNTIME           Runtime identifier (default: linux-x64)"
+    echo "  -r, --runtime TARGET_RUNTIME           Runtime identifier (default: win-x64)"
     echo "  -o, --output OUTPUT_DIRECTORY          Output directory (default: $SCRIPT_ROOT)"
     echo "  -v  --version VERSION                  Version to set files to (default: 1.0.0)"
     echo "  -i  --info INFO                        Additional info to put in version details"
@@ -76,7 +76,7 @@ echo  "Building backend executables..."
 # Set defaults
 : "${CONFIGURATION:="Release"}"
 : "${DOTNET:="net6.0"}"
-: "${RUNTIME:="linux-x64"}"
+: "${RUNTIME:="win-x64"}"
 : "${VERSION:="0.0.0"}"
 : "${INFO:=""}"
 : "${OUTPUT_DIRECTORY:="$SCRIPT_ROOT"}"
@@ -99,9 +99,9 @@ dotnet publish "$SCRIPT_ROOT/../../webapi/CopilotChatWebApi.csproj" \
     --runtime $RUNTIME \
     --self-contained \
     --output "$PUBLISH_OUTPUT_DIRECTORY" \
-    //p:AssemblyVersion=$VERSION \
-    //p:FileVersion=$VERSION \
-    //p:InformationalVersion=$INFO
+    -p:AssemblyVersion=$VERSION \
+    -p:FileVersion=$VERSION \
+    -p:InformationalVersion=$INFO
 
 if [ $? -ne 0 ]; then
     exit 1
@@ -138,7 +138,7 @@ if [[ -z "$SKIP_FRONTEND" ]]; then
     popd
 
     echo "Copying frontend files to package"
-    cp -R "$SCRIPT_ROOT/../../webapp/build" "$PUBLISH_OUTPUT_DIRECTORY/wwwroot"
+    cp -R "$SCRIPT_ROOT/../../webapp/build/." "$PUBLISH_OUTPUT_DIRECTORY/wwwroot"
 fi
 
 # if not NO_ZIP then zip the package

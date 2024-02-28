@@ -2,14 +2,23 @@
 
 import {
     AvatarProps,
+    Button,
     Persona,
     Text,
     ToggleButton,
+    Tooltip,
     makeStyles,
     mergeClasses,
     shorthands,
 } from '@fluentui/react-components';
-import { ChevronDown20Regular, ChevronUp20Regular, ThumbDislikeFilled, ThumbLikeFilled } from '@fluentui/react-icons';
+import {
+    ChevronDown20Regular,
+    ChevronUp20Regular,
+    Clipboard20Regular,
+    ClipboardTask20Regular,
+    ThumbDislikeFilled,
+    ThumbLikeFilled,
+} from '@fluentui/react-icons';
 import React, { useState } from 'react';
 import { useChat } from '../../../libs/hooks/useChat';
 import { AuthorRoles, ChatMessageType, IChatMessage, UserFeedback } from '../../../libs/models/ChatMessage';
@@ -32,6 +41,7 @@ const useClasses = makeStyles({
         display: 'flex',
         flexDirection: 'row',
         maxWidth: '75%',
+        minWidth: '24em',
         ...shorthands.borderRadius(customTokens.borderRadiusMedium),
         ...Breakpoints.small({
             maxWidth: '100%',
@@ -52,10 +62,11 @@ const useClasses = makeStyles({
     item: {
         backgroundColor: customTokens.colorNeutralBackground1,
         ...shorthands.borderRadius(customTokens.borderRadiusMedium),
-        ...shorthands.padding(customTokens.spacingVerticalS, customTokens.spacingHorizontalL),
+        ...shorthands.padding(customTokens.spacingVerticalXS, customTokens.spacingHorizontalS),
     },
     me: {
         backgroundColor: customTokens.colorMeBackground,
+        width: '100%',
     },
     time: {
         color: customTokens.colorNeutralForeground3,
@@ -114,11 +125,22 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
         : chat.getChatUserById(message.userName, selectedId, conversations[selectedId].users);
     const fullName = user?.fullName ?? message.userName;
 
+    const [messagedCopied, setMessageCopied] = useState(false);
+
+    const copyOnClick = async () => {
+        await navigator.clipboard.writeText(message.content).then(() => {
+            setMessageCopied(true);
+            setTimeout(() => {
+                setMessageCopied(false);
+            }, 2000);
+        });
+    };
+
     const avatar: AvatarProps = isBot
         ? { image: { src: conversations[selectedId].botProfilePicture } }
         : isDefaultUser
-        ? { idForColor: selectedId, color: 'colorful' }
-        : { name: fullName, color: 'colorful' };
+          ? { idForColor: selectedId, color: 'colorful' }
+          : { name: fullName, color: 'colorful' };
 
     let content: JSX.Element;
     if (isBot && message.type === ChatMessageType.Plan) {
@@ -137,6 +159,10 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
         message.userFeedback === UserFeedback.Requested &&
         messageIndex === conversations[selectedId].messages.length - 1 &&
         message.userId === 'Bot';
+
+    const messageCitations = message.citations ?? [];
+    const showMessageCitation = messageCitations.length > 0;
+    const showExtra = showMessageCitation || showShowRLHFMessage || showCitationCards;
 
     return (
         <div
@@ -162,29 +188,44 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
                     {!isMe && <Text weight="semibold">{fullName}</Text>}
                     <Text className={classes.time}>{timestampToDateString(message.timestamp, true)}</Text>
                     {isBot && <PromptDialog message={message} />}
+                    {isBot && message.prompt && (
+                        <Tooltip content={messagedCopied ? 'Copied' : 'Copy text'} relationship="label">
+                            <Button
+                                icon={messagedCopied ? <ClipboardTask20Regular /> : <Clipboard20Regular />}
+                                appearance="transparent"
+                                onClick={() => {
+                                    void copyOnClick();
+                                }}
+                            />
+                        </Tooltip>
+                    )}
                 </div>
                 {content}
-                <div className={classes.controls}>
-                    {message.citations && message.citations.length > 0 && (
-                        <ToggleButton
-                            appearance="subtle"
-                            checked={showCitationCards}
-                            className={classes.citationButton}
-                            icon={showCitationCards ? <ChevronUp20Regular /> : <ChevronDown20Regular />}
-                            iconPosition="after"
-                            onClick={() => {
-                                setShowCitationCards(!showCitationCards);
-                            }}
-                            size="small"
-                        >
-                            {`${message.citations.length} ${message.citations.length === 1 ? 'citation' : 'citations'}`}
-                        </ToggleButton>
-                    )}
-                    {showShowRLHFMessage && (
-                        <div className={classes.rlhf}>{<UserFeedbackActions messageIndex={messageIndex} />}</div>
-                    )}
-                </div>
-                {showCitationCards && <CitationCards message={message} />}
+                {showExtra && (
+                    <div className={classes.controls}>
+                        {showMessageCitation && (
+                            <ToggleButton
+                                appearance="subtle"
+                                checked={showCitationCards}
+                                className={classes.citationButton}
+                                icon={showCitationCards ? <ChevronUp20Regular /> : <ChevronDown20Regular />}
+                                iconPosition="after"
+                                onClick={() => {
+                                    setShowCitationCards(!showCitationCards);
+                                }}
+                                size="small"
+                            >
+                                {`${messageCitations.length} ${
+                                    messageCitations.length === 1 ? 'citation' : 'citations'
+                                }`}
+                            </ToggleButton>
+                        )}
+                        {showShowRLHFMessage && (
+                            <div className={classes.rlhf}>{<UserFeedbackActions messageIndex={messageIndex} />}</div>
+                        )}
+                        {showCitationCards && <CitationCards message={message} />}
+                    </div>
+                )}
             </div>
             {features[FeatureKeys.RLHF].enabled && message.userFeedback === UserFeedback.Positive && (
                 <ThumbLikeFilled color="gray" />

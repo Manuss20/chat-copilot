@@ -10,7 +10,6 @@ using CopilotChat.WebApi.Auth;
 using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Services;
-using CopilotChat.WebApi.Services.MemoryMigration;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
 using Microsoft.AspNetCore.Authentication;
@@ -22,7 +21,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using Microsoft.KernelMemory;
-using Microsoft.SemanticKernel.Diagnostics;
+using Microsoft.KernelMemory.Diagnostics;
 
 namespace CopilotChat.WebApi.Extensions;
 
@@ -54,8 +53,6 @@ public static class CopilotChatServiceExtensions
         // Chat prompt options
         AddOptions<PromptsOptions>(PromptsOptions.PropertyName);
 
-        AddOptions<PlannerOptions>(PlannerOptions.PropertyName);
-
         AddOptions<ContentSafetyOptions>(ContentSafetyOptions.PropertyName);
 
         AddOptions<KernelMemoryConfig>(MemoryConfiguration.KernelMemorySection);
@@ -79,11 +76,6 @@ public static class CopilotChatServiceExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart()
             .PostConfigure(TrimStringProperties);
-    }
-
-    internal static IServiceCollection AddUtilities(this IServiceCollection services)
-    {
-        return services.AddScoped<AskConverter>();
     }
 
     internal static IServiceCollection AddPlugins(this IServiceCollection services, IConfiguration configuration)
@@ -136,19 +128,9 @@ public static class CopilotChatServiceExtensions
 
     internal static IServiceCollection AddMaintenanceServices(this IServiceCollection services)
     {
-        // Inject migration services
-        services.AddSingleton<IChatMigrationMonitor, ChatMigrationMonitor>();
-        services.AddSingleton<IChatMemoryMigrationService, ChatMemoryMigrationService>();
-
-        // Inject actions so they can be part of the action-list.
-        services.AddSingleton<ChatMigrationMaintenanceAction>();
+        // Inject action stub
         services.AddSingleton<IReadOnlyList<IMaintenanceAction>>(
-            sp =>
-                (IReadOnlyList<IMaintenanceAction>)
-                new[]
-                {
-                    sp.GetRequiredService<ChatMigrationMaintenanceAction>(),
-                });
+            sp => (IReadOnlyList<IMaintenanceAction>)Array.Empty<IMaintenanceAction>());
 
         return services;
     }
@@ -182,7 +164,7 @@ public static class CopilotChatServiceExtensions
     public static IServiceCollection AddPersistentChatStore(this IServiceCollection services)
     {
         IStorageContext<ChatSession> chatSessionStorageContext;
-        IStorageContext<ChatMessage> chatMessageStorageContext;
+        IStorageContext<CopilotChatMessage> chatMessageStorageContext;
         IStorageContext<MemorySource> chatMemorySourceStorageContext;
         IStorageContext<ChatParticipant> chatParticipantStorageContext;
 
@@ -193,7 +175,7 @@ public static class CopilotChatServiceExtensions
             case ChatStoreOptions.ChatStoreType.Volatile:
             {
                 chatSessionStorageContext = new VolatileContext<ChatSession>();
-                chatMessageStorageContext = new VolatileContext<ChatMessage>();
+                chatMessageStorageContext = new VolatileContext<CopilotChatMessage>();
                 chatMemorySourceStorageContext = new VolatileContext<MemorySource>();
                 chatParticipantStorageContext = new VolatileContext<ChatParticipant>();
                 break;
@@ -210,7 +192,7 @@ public static class CopilotChatServiceExtensions
                 string directory = Path.GetDirectoryName(fullPath) ?? string.Empty;
                 chatSessionStorageContext = new FileSystemContext<ChatSession>(
                     new FileInfo(Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(fullPath)}_sessions{Path.GetExtension(fullPath)}")));
-                chatMessageStorageContext = new FileSystemContext<ChatMessage>(
+                chatMessageStorageContext = new FileSystemContext<CopilotChatMessage>(
                     new FileInfo(Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(fullPath)}_messages{Path.GetExtension(fullPath)}")));
                 chatMemorySourceStorageContext = new FileSystemContext<MemorySource>(
                     new FileInfo(Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(fullPath)}_memorysources{Path.GetExtension(fullPath)}")));
@@ -228,7 +210,7 @@ public static class CopilotChatServiceExtensions
 #pragma warning disable CA2000 // Dispose objects before losing scope - objects are singletons for the duration of the process and disposed when the process exits.
                 chatSessionStorageContext = new CosmosDbContext<ChatSession>(
                     chatStoreConfig.Cosmos.ConnectionString, chatStoreConfig.Cosmos.Database, chatStoreConfig.Cosmos.ChatSessionsContainer);
-                chatMessageStorageContext = new CosmosDbContext<ChatMessage>(
+                chatMessageStorageContext = new CosmosDbContext<CopilotChatMessage>(
                     chatStoreConfig.Cosmos.ConnectionString, chatStoreConfig.Cosmos.Database, chatStoreConfig.Cosmos.ChatMessagesContainer);
                 chatMemorySourceStorageContext = new CosmosDbContext<MemorySource>(
                     chatStoreConfig.Cosmos.ConnectionString, chatStoreConfig.Cosmos.Database, chatStoreConfig.Cosmos.ChatMemorySourcesContainer);
@@ -256,7 +238,7 @@ public static class CopilotChatServiceExtensions
     /// <summary>
     /// Add authorization services
     /// </summary>
-    public static IServiceCollection AddCopilotChatAuthorization(this IServiceCollection services)
+    public static IServiceCollection AddChatCopilotAuthorization(this IServiceCollection services)
     {
         return services.AddScoped<IAuthorizationHandler, ChatParticipantAuthorizationHandler>()
             .AddAuthorizationCore(options =>
@@ -275,7 +257,7 @@ public static class CopilotChatServiceExtensions
     /// <summary>
     /// Add authentication services
     /// </summary>
-    public static IServiceCollection AddCopilotChatAuthentication(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddChatCopilotAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<IAuthInfo, AuthInfo>();
         var config = services.BuildServiceProvider().GetRequiredService<IOptions<ChatAuthenticationOptions>>().Value;
